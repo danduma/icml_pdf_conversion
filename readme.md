@@ -14,3 +14,6 @@ To convert pdf to txt:
 
 To convert txt to dat:
 >  python pdfconversion.py -t icml2016/txt_files -m txt2dat
+
+Full example:
+> python pdfconversion.py -p '../icml2016/*.pdf' -t ../icml2016/txt_files/ -m full
