@@ -198,9 +198,13 @@ def createMatrixForCTR(file_dir, vocab_path, ignore=None):
     out_mult=codecs.open(path.join(file_dir,"mult.dat"),mode="w",encoding="utf-8",errors="ignore")
 
     for index,row in enumerate(data):
+        total_terms=0
         line=str(index)
         for index2,val in enumerate(row):
-            line+=" %d:%d" % (index2,val)
+            if val > 0:
+                line+=" %d:%d" % (index2,val)
+                total_terms+=1
+        line=unicode(total_terms)+" "+line
         out_mult.write(line+"\n")
     out_mult.close()
 
