@@ -1,6 +1,6 @@
 # PDF to DAT converter
 
-Takes as input a file mask of PDF files, extracts the text from them. From this text it builds a matrix of per-file counts limiting the feature counts and then saves this data in the format expected by the CTR code from (https://github.com/blei-lab/ctr)
+Takes as input a file mask of PDF files, extracts the text from them. From this text it builds a matrix of per-file counts limiting the feature counts and then saves this data in the format expected by the CTR code from (https://github.com/blei-lab/ctr).
 
 Fully python solution, no external dependencies except standard python libs.
 
