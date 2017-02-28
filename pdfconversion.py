@@ -186,6 +186,7 @@ def createMatrixForCTR(file_dir, vocab_path, ignore=None):
                                decode_error="ignore",
                                strip_accents="unicode",
                                stop_words="english",
+                               token_pattern=r'(?u)\b[a-zA-Z]\w\w\w+\b', # only keep words with three or more letters (no numbers)
                                max_features=MAX_VOCAB,
                                min_df=MIN_DF, # minimum portion of documents feature should appear in
                                max_df=MAX_DF
