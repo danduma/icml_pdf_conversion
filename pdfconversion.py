@@ -18,6 +18,8 @@ import codecs
 
 import numpy as np
 from sklearn.feature_extraction.text import CountVectorizer
+from collections import Mapping, defaultdict
+import six
 
 from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter#process_pdf
 from pdfminer.pdfpage import PDFPage
@@ -29,6 +31,55 @@ from cStringIO import StringIO
 MAX_VOCAB = 20000
 MIN_DF=0.05
 MAX_DF=0.5
+
+class CustomVectorizer(CountVectorizer):
+    """
+        Overrides the vocabulary conversion to dict so we can use a defaultdict
+    """
+##    def __init__(self, input='content', encoding='utf-8',
+##                 decode_error='strict', strip_accents=None,
+##                 lowercase=True, preprocessor=None, tokenizer=None,
+##                 stop_words=None, token_pattern=r"(?u)\b\w\w+\b",
+##                 ngram_range=(1, 1), analyzer='word',
+##                 max_df=1.0, min_df=1, max_features=None,
+##                 vocabulary=None, binary=False, dtype=np.int64):
+##
+##        super(CustomVectorizer,self).__init__(input, encoding,
+##                     decode_error, strip_accents,
+##                     lowercase, preprocessor, tokenizer,
+##                     stop_words, token_pattern,
+##                     ngram_range, analyzer,
+##                     max_df, min_df, max_features,
+##                     vocabulary, binary, dtype)
+
+    def _validate_vocabulary(self):
+        vocabulary = self.vocabulary
+        if vocabulary is not None:
+            if isinstance(vocabulary, set):
+                vocabulary = sorted(vocabulary)
+            if not isinstance(vocabulary, Mapping):
+                vocab = {}
+                for i, t in enumerate(vocabulary):
+                    if vocab.setdefault(t, i) != i:
+                        msg = "Duplicate term in vocabulary: %r" % t
+                        raise ValueError(msg)
+                vocabulary = vocab
+            else:
+                indices = set(six.itervalues(vocabulary))
+                if len(indices) != len(vocabulary):
+                    raise ValueError("Vocabulary contains repeated indices.")
+                for i in xrange(len(vocabulary)):
+                    if i not in indices:
+                        msg = ("Vocabulary of size %d doesn't contain index "
+                               "%d." % (len(vocabulary), i))
+                        raise ValueError(msg)
+            if not vocabulary:
+                raise ValueError("empty vocabulary passed to fit")
+            self.fixed_vocabulary_ = True
+##            self.vocabulary_ = dict(vocabulary)
+        else:
+            self.fixed_vocabulary_ = False
+
 
 def pdf_to_text(pdfname):
     # PDFMiner boilerplate
@@ -104,21 +155,29 @@ def convertFiles(input_mask, output_dir):
     for file_path in glob.glob(input_mask):
         pdfToTxt(file_path, output_dir)
 
+def loadVocabAsText(vocab_path):
+    """
+        Loads an existing vocabulary
+    """
+    f=codecs.open(vocab_path,encoding="utf-8",errors="ignore",mode="r")
+    text=" ".join(f.readlines())
+    text=re.sub(r"\r?\n"," ",text)
+    return text
+
 def loadVocab(vocab_path):
     """
         Loads an existing vocabulary
     """
-##    vocab={}
-##    with open(vocab_path) as f:
-##        for index,line in enumerate(f):
-##            term=line.strip().strip("\n")
-##            vocab[term]=index
-##    return vocab
+    vocab={}
+    with open(vocab_path,"r") as f:
+        for index,line in enumerate(f):
+            term=line.strip().strip("\n").strip()
+            vocab[term]=index
 
-    f=codecs.open(path.join(file_dir,"vocab.dat"),encoding="utf-8",errors="ignore",mode="r")
-    text=" ".join(f.readlines())
-    text=re.sub(r"\r?\n"," ",text)
-    return text
+    defvocab = defaultdict(lambda:0,vocab)
+    # we set the default factory to its own __len__ function. Every time we look up a key, it will create it, therefore adding 1 to the __len__()
+    defvocab.default_factory=defvocab.__len__
+    return defvocab
 
 def isNumber(text):
     """
@@ -164,11 +223,17 @@ def createMatrixForCTR(file_dir, vocab_path, ignore=None):
         Creates the input files in the format that CTR expects
     """
     if vocab_path is not None:
-        vocab_file=loadVocab(vocab_path)
+        vocab_file=loadVocabAsText(vocab_path)
+        vocab=loadVocab(vocab_path)
     else:
         vocab_file=""
-    files_text=[vocab_file]
-    files_names=["vocab"]
+        vocab=None
+
+##    files_text=[vocab_file]
+##    files_names=["vocab"]
+
+    files_text=[]
+    files_names=[]
 
     input_mask=path.join(file_dir,"*.txt")
     for file_path in glob.glob(input_mask):
@@ -182,18 +247,23 @@ def createMatrixForCTR(file_dir, vocab_path, ignore=None):
             files_text.append(text)
             files_names.append(file_path)
 
-    vectorizer=CountVectorizer('content',
+    vectorizer=CustomVectorizer('content',
                                decode_error="ignore",
                                strip_accents="unicode",
                                stop_words="english",
                                token_pattern=r'(?u)\b[a-zA-Z]\w\w\w+\b', # only keep words with three or more letters (no numbers)
                                max_features=MAX_VOCAB,
+                               vocabulary=vocab,
                                min_df=MIN_DF, # minimum portion of documents feature should appear in
                                max_df=MAX_DF
                                )
 
+    vectorizer.vocabulary_=vocab
+
     data=vectorizer.fit_transform(files_text).toarray()
-    vocab=vectorizer.get_feature_names()
+    vocab=vectorizer.vocabulary_
+
+##    vocab=vectorizer.get_feature_names()
     # TODO cleanVocabulary doesn't seem to be working the way I'd want it to. Some bug somewhere
 ##    data, vocab=cleanVocabulary(vectorizer.get_feature_names(),data)
     out_mult=codecs.open(path.join(file_dir,"mult.dat"),mode="w",encoding="utf-8",errors="ignore")
@@ -205,14 +275,14 @@ def createMatrixForCTR(file_dir, vocab_path, ignore=None):
             if val > 0:
                 line+=" %d:%d" % (index2,val)
                 total_terms+=1
-        if total_terms > 0:        
+        if total_terms > 0:
             line=unicode(total_terms)+line
             out_mult.write(line+"\n")
     out_mult.close()
 
     out_vocab=codecs.open(path.join(file_dir,"vocab.dat"),mode="w",encoding="utf-8",errors="ignore")
-    for index,feature in enumerate(vocab):
-        out_vocab.write(feature+"\n")
+    for key,index in sorted(vocab.items(), key=lambda x:x[1]):
+        out_vocab.write(key+"\n")
     out_vocab.close()
 
     out_files=codecs.open(path.join(file_dir,"files.dat"),mode="w",encoding="utf-8",errors="ignore")
